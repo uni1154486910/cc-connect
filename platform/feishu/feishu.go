@@ -135,6 +135,11 @@ type Platform struct {
 	shareSessionInChannel      bool
 	threadIsolation            bool
 	groupChatHistoryShare      bool
+	// mentionAliasUsers / mentionAliasChats: in the listed group chats, an
+	// @-mention of any listed open_id is treated as an @-mention of the bot.
+	// Empty mentionAliasChats disables the feature; "*" means every chat.
+	mentionAliasUsers map[string]bool
+	mentionAliasChats string
 	// noReplyToTrigger: when true, send via Create instead of Im.Message.Reply (no quote to the user's message).
 	noReplyToTrigger bool
 	resolveMentions  bool
@@ -377,6 +382,11 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	threadIsolation, _ := opts["thread_isolation"].(bool)
 	groupChatHistoryShare, _ := opts["group_chat_history_share"].(bool)
 	resolveMentionsOpt, _ := opts["resolve_mentions"].(bool)
+	mentionAliasUsers := parseIDSet(stringOpt(opts, "mention_alias_users"))
+	mentionAliasChats := strings.TrimSpace(stringOpt(opts, "mention_alias_chats"))
+	if len(mentionAliasUsers) > 0 && mentionAliasChats == "" {
+		slog.Warn("feishu: mention_alias_users is set but mention_alias_chats is empty; mention aliases are disabled", "name", name)
+	}
 	noReplyToTrigger := false
 	if v, ok := opts["reply_to_trigger"].(bool); ok && !v {
 		noReplyToTrigger = true
@@ -490,6 +500,8 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		shareSessionInChannel:      shareSessionInChannel,
 		threadIsolation:            threadIsolation,
 		groupChatHistoryShare:      groupChatHistoryShare,
+		mentionAliasUsers:          mentionAliasUsers,
+		mentionAliasChats:          mentionAliasChats,
 		resolveMentions:            resolveMentionsOpt,
 		noReplyToTrigger:           noReplyToTrigger,
 		client:                     lark.NewClient(appID, appSecret, clientOpts...),
@@ -1764,6 +1776,12 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	botOpenID := p.getBotOpenID()
 	filterActive := botOpenID != "" || p.IsGroupFilterDegraded()
 	botMentioned := botOpenID != "" && isBotMentioned(msg.Mentions, botOpenID)
+	if !botMentioned && chatType == "group" && p.mentionAliasHit(chatID, msg.Mentions) {
+		// An alias (e.g. the bot's owner) was @-mentioned in a chat where that
+		// counts as addressing the bot: handle it exactly like an @bot message.
+		slog.Debug(p.tag()+": mention alias treated as bot mention", "chat_id", chatID, "message_id", messageID)
+		botMentioned = true
+	}
 	atEveryone := p.respondToAtEveryoneAndHere && msg.Content != nil && strings.Contains(*msg.Content, "@_all")
 
 	// With history sharing enabled, observe ordinary text/post messages only
@@ -4008,6 +4026,31 @@ func (p *Platform) fetchBotOpenID() (string, error) {
 		return "", fmt.Errorf("api code=%d", result.Code)
 	}
 	return result.Bot.OpenID, nil
+}
+
+// mentionAliasHit reports whether the message @-mentions one of the configured
+// alias open_ids inside a chat where aliases are enabled.
+func (p *Platform) mentionAliasHit(chatID string, mentions []*larkim.MentionEvent) bool {
+	if len(p.mentionAliasUsers) == 0 || p.mentionAliasChats == "" || !core.AllowList(p.mentionAliasChats, chatID) {
+		return false
+	}
+	for _, m := range mentions {
+		if m.Id != nil && m.Id.OpenId != nil && p.mentionAliasUsers[*m.Id.OpenId] {
+			return true
+		}
+	}
+	return false
+}
+
+// parseIDSet splits a comma-separated id list into a set, ignoring blanks.
+func parseIDSet(s string) map[string]bool {
+	set := map[string]bool{}
+	for _, id := range strings.Split(s, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			set[id] = true
+		}
+	}
+	return set
 }
 
 func isBotMentioned(mentions []*larkim.MentionEvent, botOpenID string) bool {
@@ -7587,4 +7630,22 @@ func (p *Platform) SetPreviewStatus(previewHandle any, status core.CardStatus) {
 	if !resp.Success() {
 		slog.Debug("feishu: set preview status patch failed", "code", resp.Code, "msg", resp.Msg)
 	}
+}
+
+// stringOpt reads a string option, tolerating a missing key or a TOML array
+// of strings (joined with commas).
+func stringOpt(opts map[string]any, key string) string {
+	switch v := opts[key].(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, ",")
+	}
+	return ""
 }
