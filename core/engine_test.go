@@ -3057,10 +3057,10 @@ func TestSendPermissionPrompt_CardPlatform(t *testing.T) {
 
 	e.sendPermissionPrompt(p, "ctx", "full prompt text", "write_file", "/tmp/test.txt")
 
-	if len(p.sentCards) != 1 {
-		t.Fatalf("expected 1 sent card, got %d", len(p.sentCards))
+	if len(p.repliedCards) != 1 || len(p.sentCards) != 0 {
+		t.Fatalf("expected the permission card as 1 reply and 0 new messages, got replied=%d sent=%d", len(p.repliedCards), len(p.sentCards))
 	}
-	card := p.sentCards[0]
+	card := p.repliedCards[0]
 	if card.Header == nil || card.Header.Color != "orange" {
 		t.Errorf("expected orange header, got %+v", card.Header)
 	}

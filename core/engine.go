@@ -12426,7 +12426,10 @@ func (e *Engine) sendPermissionPrompt(p Platform, replyCtx any, prompt, toolName
 			Buttons(allowAllBtn).
 			Note(e.i18n.T(MsgPermCardNote)).
 			Build()
-		e.sendWithCard(p, replyCtx, card)
+		// Reply (not a fresh message) so the permission card is attached to the
+		// triggering message, like every other turn output. With several sessions
+		// active in one group this tells the user which request is asking.
+		e.replyWithCard(p, replyCtx, card)
 		return
 	}
 
