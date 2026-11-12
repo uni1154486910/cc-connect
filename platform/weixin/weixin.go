@@ -606,6 +606,7 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 		Files:      files,
 		Audio:      audio,
 		ReplyCtx:   rc,
+		IsPrivate:  true, // ilink personal WeChat bots only receive direct messages
 	})
 }
 

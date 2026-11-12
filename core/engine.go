@@ -366,6 +366,7 @@ type Engine struct {
 	tts                   *TTSCfg
 	display               DisplayCfg
 	injectSender          bool
+	steerPrivate          bool // deliver private-chat messages into the running turn instead of queueing
 	attachmentSendEnabled bool
 	startedAt             time.Time
 
@@ -1063,6 +1064,56 @@ func (e *Engine) SetSkipGit(skipGit bool) {
 // accordingly (e.g. personal task views, role-based access control).
 func (e *Engine) SetInjectSender(v bool) {
 	e.injectSender = v
+}
+
+// SetSteerPrivate controls whether a private-chat message that arrives while
+// the session is busy is delivered into the running turn (like /ps) instead of
+// being queued for the next turn. Group chats always queue.
+func (e *Engine) SetSteerPrivate(v bool) {
+	e.steerPrivate = v
+}
+
+// steerBusySession delivers msg into the agent's in-flight turn. It only acts
+// for private chats on Claude Code sessions that are busy and alive; any other
+// case, or a failed send, returns false so the caller falls back to queueing.
+// Claude Code folds a mid-turn stdin message into the current turn (one
+// result), so no extra EventResult is awaited — same contract as /ps.
+func (e *Engine) steerBusySession(p Platform, msg *Message, interactiveKey string, session *Session) bool {
+	if !e.steerPrivate || !msg.IsPrivate || e.agent == nil || e.agent.Name() != "claudecode" || !session.Busy() {
+		return false
+	}
+	text := strings.TrimSpace(msg.Content)
+	if msg.ExtraContent != "" {
+		text = strings.TrimSpace(msg.ExtraContent + "\n\n" + text)
+	}
+	if text == "" && len(msg.Images) == 0 && len(msg.Files) == 0 {
+		return false
+	}
+	e.interactiveMu.Lock()
+	state, ok := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+	if !ok || state == nil {
+		return false
+	}
+	state.mu.Lock()
+	as := state.agentSession
+	if as == nil || !as.Alive() || e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
+		state.mu.Unlock()
+		return false
+	}
+	busy := state.busySession
+	state.mu.Unlock()
+	if err := as.Send(text, msg.MessageID, msg.Images, msg.Files); err != nil {
+		slog.Warn("steer: mid-turn send failed; falling back to queue", "session", msg.SessionKey, "error", err)
+		return false
+	}
+	if busy != nil {
+		busy.TouchUserActivity()
+	}
+	runMessageAccepted(msg)
+	slog.Info("steer: private message delivered into running turn", "session", msg.SessionKey, "msg_id", msg.MessageID)
+	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerDelivered))
+	return true
 }
 
 // SetAttachmentSendEnabled controls whether side-channel image/file delivery is allowed.
@@ -3253,6 +3304,10 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 			}
 		}
 		// ── end self-heal; queueing path below is unchanged ────────────────
+		// Private chats can steer the running turn instead of waiting.
+		if e.steerBusySession(p, msg, interactiveKey, session) {
+			return
+		}
 		// Session is busy — try to queue the message for the running turn
 		// so the agent processes it immediately after the current turn ends.
 		if e.queueMessageForBusySession(p, msg, interactiveKey) {

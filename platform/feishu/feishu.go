@@ -110,6 +110,7 @@ type replyContext struct {
 	messageID        string
 	chatID           string
 	sessionKey       string
+	isPrivate        bool // p2p chat; stamped onto core.Message for private-only features
 	bootstrapThread  bool
 	receiptEmoji     string // persistent reaction owned by the accepted-message callback
 	receiptMessageID string
@@ -1875,7 +1876,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	mentions := msg.Mentions
 	parentID := stringValue(msg.ParentId)
 
-	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, isPrivate: chatType == "p2p"}
 	var groupHistoryCtx groupHistoryContext
 	if p.groupChatHistoryShare && chatType == "group" && !p.groupReplyAll && botOpenID != "" && (botMentioned || atEveryone) {
 		scope := p.groupHistoryScope(msg, chatID)
@@ -1952,6 +1953,7 @@ func (p *Platform) dispatchMessageWithHistory(ctx context.Context, msgType, cont
 	}
 	historyText := p.formatGroupHistory(groupHistoryCtx)
 	dispatchCore := func(msg *core.Message) {
+		msg.IsPrivate = rctx.isPrivate
 		if historyText != "" {
 			msg.ExtraContent = joinFeishuExtraContent(historyText, msg.ExtraContent)
 			msg.OnAccepted = groupHistoryCtx.onAccepted

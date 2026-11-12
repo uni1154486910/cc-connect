@@ -413,6 +413,7 @@ type Message struct {
 	UserID       string
 	UserName     string
 	ChatName     string // human-readable chat/group name (optional)
+	IsPrivate    bool   // one-to-one chat with the bot (not a group); set by platforms that know it
 	Content      string
 	Images       []ImageAttachment   // attached images (if any)
 	Files        []FileAttachment    // attached files (if any)

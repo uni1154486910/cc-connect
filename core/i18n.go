@@ -554,6 +554,7 @@ const (
 	MsgAdminRequired     MsgKey = "admin_required"
 	MsgRateLimited       MsgKey = "rate_limited"
 	MsgPsSent            MsgKey = "ps_sent"
+	MsgSteerDelivered    MsgKey = "steer_delivered"
 	MsgPsSendFailed      MsgKey = "ps_send_failed"
 	MsgPsEmpty           MsgKey = "ps_empty"
 	MsgPsNoSession       MsgKey = "ps_no_session"
@@ -3452,6 +3453,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ P.S. 已送達。",
 		LangJapanese:           "✅ P.S. を送信しました。",
 		LangSpanish:            "✅ P.S. entregado.",
+	},
+	MsgSteerDelivered: {
+		LangEnglish:            "↪ Added to the task in progress; it will be read at the next step.",
+		LangChinese:            "↪ 已插入正在进行的任务，会在下一步读到。",
+		LangTraditionalChinese: "↪ 已插入正在進行的任務，會在下一步讀到。",
+		LangJapanese:           "↪ 実行中のタスクに追加しました。次のステップで読み込まれます。",
+		LangSpanish:            "↪ Añadido a la tarea en curso; se leerá en el siguiente paso.",
 	},
 	MsgPsSendFailed: {
 		LangEnglish:            "❌ Failed to deliver P.S.",
